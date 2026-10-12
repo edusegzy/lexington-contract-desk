@@ -15,10 +15,16 @@
 <label>3 · Select your completed TREC PDF (local preview only)<input id="completedContract" type="file" accept=".pdf,application/pdf" onchange="previewContract(event)"></label><p id="pdfStatus">No completed PDF selected.</p><div class="buttons"><button id="viewPdf" onclick="viewContract()" disabled>Preview selected PDF</button><a class="btn secondary" target="_blank" rel="noopener" href="https://app.docusign.com/">4 · Open DocuSign to upload & send ↗</a></div>
 <label><input style="width:auto;display:inline" type="checkbox" id="checkedContract"> I have reviewed the complete official TREC PDF, applicable addenda and signing details.</label>
 <p><b>Manual handoff:</b> Download and review the completed official PDF, open DocuSign, choose New → Send an Envelope, upload the PDF and any addenda, enter the seller's email, place required signatures and initials, and send only after final review. This is a separate DocuSign workflow; the browser-selected PDF is <b>not</b> automatically uploaded.</p>
-<p>For in-chat DocuSign upload and signature setup, ask ChatGPT: “Open DocuSign upload for my completed TREC contract.”</p>
+<div style="margin-top:20px;padding:18px;background:#edf5ff;border:1px solid #bdd7f6;border-radius:10px"><h3>Auto-fill official TREC 20-19 PDF</h3>
+<p>Download the original <a href="https://www.trec.texas.gov/sites/default/files/pdf-forms/20-19_4.pdf" target="_blank">12-page TREC 20-19 PDF</a>. Select that PDF below and automatically populate recognized deal fields. Review <b>every page</b> and complete any remaining sections and addenda before signature.</p>
+<label>Official source PDF<input type="file" id="sourceTrec" accept=".pdf,application/pdf"></label>
+<div class="buttons"><button onclick="fillTrec()">Auto-fill & download official TREC PDF</button></div><p id="fillStatus"></p>
+</div><div style="margin-top:18px;padding:18px;border:1px solid #c5d8ea;border-radius:10px"><h3>DocuSign API envelope</h3><p>Website API requires your own authorized DocuSign developer integration and server credentials. Create a <b>draft envelope</b> first, verify all signature/initial positions in DocuSign, then send from DocuSign. Sending unreviewed documents automatically is deliberately disabled.</p>
+<label>Website API access key (not your DocuSign password)<input id="apiKey" type="password" autocomplete="off" placeholder="Configured server-side APP_ACCESS_KEY"></label>
+<div class="buttons"><button id="draftSend" onclick="createDocusignDraft()">Create DocuSign draft from completed PDF</button></div><p id="envelopeResult"></p></div><p>For in-chat DocuSign upload and signature setup, ask ChatGPT: “Open DocuSign upload for my completed TREC contract.”</p>
 </section><section id="instructions" class="section"><h2>Prepare and send for signature</h2><p>1. Enter the deal and save it. 2. Open the <a href="https://www.trec.texas.gov/forms/one-four-family-residential-contract-resale" target="_blank">official current TREC resale contract</a>, then complete the full legal form and any addenda using the verified terms. 3. Review the contract and confirm seller names and addresses. 4. Upload the completed official PDF to <a href="https://app.docusign.com/" target="_blank">DocuSign</a>, add recipients and place signature fields. 5. Send and retain the completed contract and signing certificate.</p><div class="warning">Direct automated DocuSign sending and pre-filling the official TREC PDF are not implemented in this starter website.</div></section>
 </div></div><p style="font-size:12px">Lexington Contract Desk • Local browser storage only • Do not place sensitive records on shared computers • Not legal advice.</p></main>
-<script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script><script>
 const fieldEls=[...document.querySelectorAll('[data-key]')],storageKey='lexington-contract-desk-v2';let store;try{store=JSON.parse(localStorage.getItem(storageKey))||{deals:{},templates:{}}}catch{store={deals:{},templates:{}}}
 const get=()=>Object.fromEntries(fieldEls.map(x=>[x.dataset.key,x.value]));function fill(v){fieldEls.forEach(x=>{let value=v[x.dataset.key];x.value=value===undefined?(x.tagName==='SELECT'?x.options[0].value:''):value});update()}
 function show(id){document.querySelectorAll('section.section').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav===id));if(id==='review')update();if(id==='saved')list();scrollTo(0,0)}
@@ -28,5 +34,51 @@ function list(){for(let kind of ['deals','templates']){let el=document.getElemen
 function download(){let b=new Blob([JSON.stringify({deal:get()},null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=(get().id||'lexington-offer')+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 async function importFile(e){try{let d=JSON.parse(await e.target.files[0].text());fill(d.deal||d);show('property')}catch{alert('Invalid JSON file')}}
 let selectedContract=null;function previewContract(e){const f=e.target.files&&e.target.files[0],status=document.getElementById('pdfStatus'),btn=document.getElementById('viewPdf');if(selectedContract)URL.revokeObjectURL(selectedContract);selectedContract=null;btn.disabled=true;if(!f){status.textContent='No completed PDF selected.';return}if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf')){status.textContent='Please select a PDF.';return}selectedContract=URL.createObjectURL(f);status.textContent='Selected: '+f.name+' ('+Math.round(f.size/1024)+' KB) • stays on this device';btn.disabled=false}function viewContract(){if(selectedContract)window.open(selectedContract,'_blank','noopener')}function resetDeal(){if(confirm('Clear current form?')){fill({buyer:'Jegede LLC'});show('property')}}
+
+const TREC_FIELDS=[
+{page:0,k:'seller',x:287,y:102,max:76},{page:0,k:'buyer',x:145,y:114,max:72},
+{page:0,k:'lot',x:144,y:173,max:14},{page:0,k:'block',x:225,y:173,max:16},
+{page:0,k:'legal',x:322,y:173,max:62},{page:0,k:'city',x:210,y:184,max:35},
+{page:0,k:'county',x:444,y:184,max:35},{page:0,k:'address',x:200,y:196,max:65},
+{page:0,k:'cash',x:460,y:471,max:15},{page:0,k:'loan',x:460,y:526,max:15},{page:0,k:'price',x:460,y:539,max:15},
+{page:1,k:'titleCompany',x:310,y:453,max:40},
+{page:1,k:'earnest',x:299,y:93,max:16},{page:1,k:'optionFee',x:494,y:93,max:15},
+{page:1,k:'optionDays',x:89,y:292,max:5}
+];
+async function fillTrec(){
+let el=document.getElementById('fillStatus');
+try{
+if(!window.PDFLib)throw Error('PDF library did not load. Please check internet access.');
+let src=document.getElementById('sourceTrec').files[0];if(!src)throw Error('Select the original official TREC 20-19 PDF first.');
+let d=get();if(!d.buyer||!d.seller||!d.address||!d.price)throw Error('Enter buyer, seller, address and price first.');
+if(d.type!=='Resale 1–4 family')throw Error('Form 20-19 is for resale of 1–4 family residences only.');
+if(Number(d.cash||0)+Number(d.loan||0)!==Number(d.price))throw Error('Cash portion + loan amount must equal purchase price.');
+let doc=await PDFLib.PDFDocument.load(await src.arrayBuffer(),{ignoreEncryption:false});
+if(doc.getPageCount()!==12)throw Error('Expected the official 12-page TREC 20-19; selected PDF has '+doc.getPageCount()+' pages.');
+let pages=doc.getPages(),font=await doc.embedFont(PDFLib.StandardFonts.Helvetica),count=0;
+for(let it of TREC_FIELDS){const value=String(d[it.k]||'').trim();if(!value)continue;
+const page=pages[it.page],scale=page.getWidth()/612;
+let chars=Array.from(value).slice(0,it.max).join('');
+const size=9*scale;while(font.widthOfTextAtSize(chars,size)>180*scale&&chars.length>1)chars=chars.slice(0,-1);
+page.drawText(chars,{x:it.x*scale,y:page.getHeight()-it.y*scale,size,font,color:PDFLib.rgb(0.05,0.18,0.35)});
+count++;
+}
+const bytes=await doc.save();let blob=new Blob([bytes],{type:'application/pdf'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='TREC-20-19-partially-filled-'+(d.id||'offer')+'.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+el.textContent='Populated '+count+' selected fields on the official form. This is a PARTIALLY filled draft. Review placement and fill all remaining blanks, checkboxes, initials, addenda, and signatures before sending.';
+}catch(e){el.textContent='Could not generate: '+e.message}
+}
+async function createDocusignDraft(){
+const out=document.getElementById('envelopeResult');out.textContent='';
+try{
+let file=document.getElementById('completedContract').files[0];if(!file)throw Error('Select the completed contract PDF above.');
+if(!document.getElementById('checkedContract').checked)throw Error('Review the complete contract and check the review confirmation.');
+let d=get();if(!d.seller||!d.sellerEmail||!d.buyer||!d.buyerEmail)throw Error('Seller and buyer names and email addresses are required.');
+let key=document.getElementById('apiKey').value;if(!key)throw Error('Enter your website API access key.');
+if(file.size>8*1024*1024)throw Error('PDF must be under 8 MB.');
+let bytes=await file.arrayBuffer(),binary='',u=new Uint8Array(bytes);for(let i=0;i<u.length;i+=8192){binary+=String.fromCharCode(...u.subarray(i,i+8192))}
+const response=await fetch('/api/envelope',{method:'POST',headers:{'Content-Type':'application/json','X-App-Key':key},body:JSON.stringify({pdfBase64:btoa(binary),seller:d.seller,sellerEmail:d.sellerEmail,buyer:d.buyer,buyerEmail:d.buyerEmail,property:d.address})});
+let data=await response.json();if(!response.ok)throw Error(data.error||'Server error');out.textContent='DocuSign draft created: '+data.envelopeId+'. Open DocuSign to review tabs and send.'; 
+}catch(e){out.textContent='Draft not created: '+e.message}
+}
 fieldEls.forEach(x=>x.addEventListener('input',update));update();
 </script></html>
