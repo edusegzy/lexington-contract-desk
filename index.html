@@ -16,9 +16,9 @@
 <label><input style="width:auto;display:inline" type="checkbox" id="checkedContract"> I have reviewed the complete official TREC PDF, applicable addenda and signing details.</label>
 <p><b>Manual handoff:</b> Download and review the completed official PDF, open DocuSign, choose New → Send an Envelope, upload the PDF and any addenda, enter the seller's email, place required signatures and initials, and send only after final review. This is a separate DocuSign workflow; the browser-selected PDF is <b>not</b> automatically uploaded.</p>
 <div style="margin-top:20px;padding:18px;background:#edf5ff;border:1px solid #bdd7f6;border-radius:10px"><h3>Auto-fill official TREC 20-19 PDF</h3>
-<p>Download the original <a href="https://www.trec.texas.gov/sites/default/files/pdf-forms/20-19_4.pdf" target="_blank">12-page TREC 20-19 PDF</a>. Select that PDF below and automatically populate recognized deal fields. Review <b>every page</b> and complete any remaining sections and addenda before signature.</p>
+<p>Download the original <a href="https://www.trec.texas.gov/sites/default/files/pdf-forms/20-19_4.pdf" target="_blank">12-page TREC 20-19 PDF</a>. Select that PDF below and populate recognized native PDF form fields without relying on coordinate overlays. Review <b>every page</b> and complete any remaining sections and addenda before signature.</p>
 <label>Official source PDF<input type="file" id="sourceTrec" accept=".pdf,application/pdf"></label>
-<div class="buttons"><button onclick="fillTrec()">Auto-fill & download official TREC PDF</button></div><p id="fillStatus"></p>
+<div class="buttons"><button onclick="fillTrec()">Fill actual PDF fields & download</button></div><p id="fillStatus"></p>
 </div><div style="margin-top:18px;padding:18px;border:1px solid #c5d8ea;border-radius:10px"><h3>DocuSign API envelope</h3><p>Website API requires your own authorized DocuSign developer integration and server credentials. Create a <b>draft envelope</b> first, verify all signature/initial positions in DocuSign, then send from DocuSign. Sending unreviewed documents automatically is deliberately disabled.</p>
 <label>Website API access key (not your DocuSign password)<input id="apiKey" type="password" autocomplete="off" placeholder="Configured server-side APP_ACCESS_KEY"></label>
 <div class="buttons"><button id="draftSend" onclick="createDocusignDraft()">Create DocuSign draft from completed PDF</button></div><p id="envelopeResult"></p></div><p>For in-chat DocuSign upload and signature setup, ask ChatGPT: “Open DocuSign upload for my completed TREC contract.”</p>
@@ -46,26 +46,41 @@ const TREC_FIELDS=[
 {page:1,k:'optionDays',x:89,y:292,max:5}
 ];
 async function fillTrec(){
-let el=document.getElementById('fillStatus');
-try{
-if(!window.PDFLib)throw Error('PDF library did not load. Please check internet access.');
-let src=document.getElementById('sourceTrec').files[0];if(!src)throw Error('Select the original official TREC 20-19 PDF first.');
-let d=get();if(!d.buyer||!d.seller||!d.address||!d.price)throw Error('Enter buyer, seller, address and price first.');
-if(d.type!=='Resale 1–4 family')throw Error('Form 20-19 is for resale of 1–4 family residences only.');
-if(Number(d.cash||0)+Number(d.loan||0)!==Number(d.price))throw Error('Cash portion + loan amount must equal purchase price.');
-let doc=await PDFLib.PDFDocument.load(await src.arrayBuffer(),{ignoreEncryption:false});
-if(doc.getPageCount()!==12)throw Error('Expected the official 12-page TREC 20-19; selected PDF has '+doc.getPageCount()+' pages.');
-let pages=doc.getPages(),font=await doc.embedFont(PDFLib.StandardFonts.Helvetica),count=0;
-for(let it of TREC_FIELDS){const value=String(d[it.k]||'').trim();if(!value)continue;
-const page=pages[it.page],scale=page.getWidth()/612;
-let chars=Array.from(value).slice(0,it.max).join('');
-const size=9*scale;while(font.widthOfTextAtSize(chars,size)>180*scale&&chars.length>1)chars=chars.slice(0,-1);
-page.drawText(chars,{x:it.x*scale,y:page.getHeight()-it.y*scale,size,font,color:PDFLib.rgb(0.05,0.18,0.35)});
-count++;
-}
-const bytes=await doc.save();let blob=new Blob([bytes],{type:'application/pdf'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='TREC-20-19-partially-filled-'+(d.id||'offer')+'.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
-el.textContent='Populated '+count+' selected fields on the official form. This is a PARTIALLY filled draft. Review placement and fill all remaining blanks, checkboxes, initials, addenda, and signatures before sending.';
-}catch(e){el.textContent='Could not generate: '+e.message}
+ const el=document.getElementById('fillStatus');
+ try{
+  if(!window.PDFLib)throw Error('PDF form library has not loaded.');
+  const source=document.getElementById('sourceTrec').files[0];if(!source)throw Error('Select the attached fillable TREC 20-19 PDF.');
+  const d=get();if(!d.buyer||!d.seller||!d.address||!d.price)throw Error('Enter buyer, seller, address, and purchase price.');
+  if(d.type!=='Resale 1–4 family')throw Error('This contract applies to resale of one-to-four family residences only.');
+  if(Number(d.cash||0)+Number(d.loan||0)!==Number(d.price))throw Error('Cash portion and financing must sum to purchase price.');
+  const doc=await PDFLib.PDFDocument.load(await source.arrayBuffer());
+  if(doc.getPageCount()!==12)throw Error('Expected a 12-page TREC 20-19 PDF.');
+  const form=doc.getForm(), fields=form.getFields(), names=new Set(fields.map(f=>f.getName()));
+  if(!names.has('1 PARTIES The parties to this contract are')||!names.has('Seller and'))throw Error('This is not the mapped fillable TREC 20-19 version. Upload the attached form.');
+  const mapping={
+   seller:'1 PARTIES The parties to this contract are',
+   buyer:'Seller and',
+   lot:'A LAND Lot',block:'Block',legal:'undefined',
+   city:'Addition City of',county:'County of',address:'Texas known as',
+   cash:'undefined_3',loan:'undefined_4',price:'undefined_5',
+   earnest:'as earnest money to',optionFee:'as earnest money to 2',
+   optionDays:'the Title Company and Buyers lenders Check one box only',
+   titleCompany:'insurance Title Policy issued by',
+   closing:'A The closing of the sale will be on or before'
+  };
+  let done=[],errors=[];
+  for(const [key,name] of Object.entries(mapping)){
+   let val=String(d[key]??'').trim();if(!val)continue;
+   if(key==='closing')val=new Date(val+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric'});
+   try{
+    const field=form.getTextField(name);field.setText(val);done.push(key);
+   }catch(e){errors.push(key);}
+  }
+  try{form.updateFieldAppearances(await doc.embedFont(PDFLib.StandardFonts.Helvetica));}catch(e){errors.push('appearance updates');}
+  const bytes=await doc.save({updateFieldAppearances:true});const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));const a=document.createElement('a');
+  a.href=url;a.download='TREC-20-19-filled-'+(d.id||'offer')+'.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  el.textContent='Filled '+done.length+' native PDF fields ('+done.join(', ')+'). Review every field on all 12 pages. Other clauses, selections, signatures and addenda remain for your review.'+(errors.length?' Unmapped: '+errors.join(', '):'');
+ }catch(e){el.textContent='PDF not generated: '+e.message}
 }
 async function createDocusignDraft(){
 const out=document.getElementById('envelopeResult');out.textContent='';
